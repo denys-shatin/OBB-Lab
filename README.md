@@ -1,6 +1,6 @@
 # 🧊 OBB Lab
 
-**Professional OBB (Oriented Bounding Box) Generator for Minecraft Bedrock Edition**
+**Professional OBB (Oriented Bounding Box) Generator for Minecraft modding**
 
 [![Live Demo](https://img.shields.io/badge/🚀_Live_Demo-OBB_Lab-2997ff?style=for-the-badge)](https://denys-shatin.github.io/OBB-Lab/)
 [![License](https://img.shields.io/badge/License-MIT-green?style=for-the-badge)](LICENSE)
@@ -161,6 +161,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 **[🚀 Try OBB Lab Now](https://denys-shatin.github.io/OBB-Lab/)**
 
-Made with ❤️ for the Minecraft Bedrock community
+Made with ❤️ for the Minecraft modding community
 
 </div>
