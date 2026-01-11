@@ -1,0 +1,27 @@
+{
+  "name": "obb-lab",
+  "version": "1.0.0",
+  "description": "Professional OBB Generator for Minecraft Bedrock Edition",
+  "type": "module",
+  "homepage": "https://denys-shatin.github.io/OBB-Lab/",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/denys-shatin/OBB-Lab.git"
+  },
+  "keywords": ["minecraft", "bedrock", "obb", "3d", "svelte", "threejs"],
+  "author": "Denys Shatin",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "three": "^0.160.0"
+  },
+  "devDependencies": {
+    "@sveltejs/vite-plugin-svelte": "^3.0.0",
+    "svelte": "^4.2.0",
+    "vite": "^5.0.0"
+  }
+}
