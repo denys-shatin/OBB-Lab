@@ -800,12 +800,14 @@
 
       const { boneName, originalOrigin, originalSize } = mesh.userData;
 
+      // Оригинальная формула: Size = originalSize / 32
       const size = [
         toFloat(originalSize[0] / 32),
         toFloat(originalSize[1] / 32),
         toFloat(originalSize[2] / 32)
       ];
 
+      // Position = origin / 16 с инверсией X,Z (БЕЗ добавления size/2)
       const position = [
         toFloat((originalOrigin[0] / 16) * -1),
         toFloat(originalOrigin[1] / 16),
@@ -821,7 +823,7 @@
 
       obbArray.push({
         "Size": [toFloat(scale.x / 2), toFloat(scale.y / 2), toFloat(scale.z / 2)],
-        "Position": [toFloat(pos.x * -16), toFloat(pos.y * 16), toFloat(pos.z * -16)],
+        "Position": [toFloat(pos.x * -1), toFloat(pos.y), toFloat(pos.z * -1)],
         "Part": "Manual"
       });
     }
@@ -850,8 +852,21 @@
     if (obbArray.length > 0) result["OBB"] = obbArray;
     if (seatsArray.length > 0) result["Seats"] = seatsArray;
     
-    let jsonString = JSON.stringify(result, null, 2);
-    outputText = jsonString.substring(1, jsonString.length - 1).trim();
+    // Формат с отступами внутри объектов
+    let parts = [];
+    if (result["OBB"]) {
+      const obbItems = result["OBB"].map(o => 
+        `{\n  "Size": [${o.Size.join(', ')}],\n  "Position": [${o.Position.join(', ')}],\n  "Part": "${o.Part}"\n}`
+      );
+      parts.push(`"OBB": [\n${obbItems.join(',\n')}\n]`);
+    }
+    if (result["Seats"]) {
+      const seatsItems = result["Seats"].map(s => 
+        `{\n  "HidePassenger": ${s.HidePassenger},\n  "BanHand": ${s.BanHand},\n  "Transform": "${s.Transform}",\n  "Position": [${s.Position.join(', ')}]\n}`
+      );
+      parts.push(`"Seats": [\n${seatsItems.join(',\n')}\n]`);
+    }
+    outputText = parts.join(',\n');
   }
 
   function handleModelUpload(e) {
@@ -990,7 +1005,7 @@
     controls.update();
   }
 
-  function toFloat(n) { return parseFloat(n.toFixed(5)); }
+  function toFloat(n) { return parseFloat(n.toFixed(4)); }
   function showError(msg) { errorMessage = msg; }
   function copyText() { navigator.clipboard.writeText(outputText); }
 </script>
