@@ -8,6 +8,11 @@ yarn-error.log*
 dist/
 build/
 
+# Tauri
+src-tauri/target/
+src-tauri/gen/
+Cargo.lock
+
 # Environment variables
 .env
 .env.local
@@ -41,3 +46,7 @@ coverage/
 # Temporary folders
 tmp/
 temp/
+
+# Test files
+*.geo.json
+backup
