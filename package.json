@@ -8,19 +8,31 @@
     "type": "git",
     "url": "https://github.com/denys-shatin/OBB-Lab.git"
   },
-  "keywords": ["minecraft", "bedrock", "obb", "3d", "svelte", "threejs"],
+  "keywords": [
+    "minecraft",
+    "bedrock",
+    "obb",
+    "3d",
+    "svelte",
+    "threejs",
+    "tauri"
+  ],
   "author": "Denys Shatin",
   "license": "MIT",
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "tauri": "tauri",
+    "tauri:dev": "tauri dev",
+    "tauri:build": "tauri build"
   },
   "dependencies": {
     "three": "^0.160.0"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^3.0.0",
+    "@tauri-apps/cli": "^2.9.6",
     "svelte": "^4.2.0",
     "vite": "^5.0.0"
   }

@@ -258,15 +258,24 @@
     0xaed581, // лайм
   ];
   let boneColorMap = {};
+  let resizeObserver = null;
 
   onMount(() => {
     detectLanguage();
     initThreeJS();
-    window.addEventListener('resize', onWindowResize);
+    
+    // ResizeObserver для отслеживания изменения размера контейнера
+    resizeObserver = new ResizeObserver(() => {
+      onWindowResize();
+    });
+    if (canvasContainer) {
+      resizeObserver.observe(canvasContainer);
+    }
+    
     window.addEventListener('keydown', onKeyDown);
     window.addEventListener('keyup', onKeyUp);
     return () => {
-      window.removeEventListener('resize', onWindowResize);
+      if (resizeObserver) resizeObserver.disconnect();
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
       if (renderer) renderer.dispose();
@@ -1117,20 +1126,22 @@
     
     // Функция определения группы для объединения
     function getMergeGroup(boneName, meshes) {
-      // Для танков (tracked) объединяем колёса по позиции X
-      if (vehicleType === 'tracked') {
-        // Проверяем, похоже ли на колесо по имени
-        const isWheel = /^(wheel|whell|whl|koleso)/i.test(boneName);
-        if (isWheel && meshes && meshes.length > 0) {
-          // Определяем сторону по позиции X первого меша
+      // Проверяем, похоже ли на колесо по имени
+      const isWheelByName = /^(wheel|whell|whl|koleso)/i.test(boneName);
+      
+      if (isWheelByName) {
+        // Для танков объединяем колёса по стороне
+        if (vehicleType === 'tracked' && meshes && meshes.length > 0) {
           const worldPos = new THREE.Vector3();
           meshes[0].getWorldPosition(worldPos);
           if (worldPos.x > 0.1) {
-            return 'WheelLeft'; // В Three.js X > 0 это левая сторона (инверсия)
+            return 'WheelLeft';
           } else if (worldPos.x < -0.1) {
             return 'WheelRight';
           }
         }
+        // Для машин - каждое колесо отдельно
+        return boneName;
       }
       
       for (const group of mergeGroups) {
@@ -1138,7 +1149,7 @@
           return group.name;
         }
       }
-      return boneName; // если не подходит ни под одну группу - оставляем как есть
+      return boneName;
     }
     
     // Функция проверки "антенноподобности" кости
@@ -1269,8 +1280,13 @@
       });
     });
 
-    // Фильтруем OBB которые полностью внутри других
+    // Фильтруем OBB которые полностью внутри других (но не колёса!)
     const filteredObbList = tempObbList.filter((obb, index) => {
+      // Колёса не фильтруем - они должны быть отдельными
+      if (/^(wheel|whell|whl|koleso)/i.test(obb.part)) {
+        return true;
+      }
+      
       // Проверяем, не находится ли этот OBB полностью внутри другого большего OBB
       for (let i = 0; i < tempObbList.length; i++) {
         if (i === index) continue;
@@ -1826,8 +1842,8 @@
     -webkit-font-smoothing: antialiased;
   }
   
-  .app-layout { display: flex; width: 100vw; height: 100vh; }
-  .viewport-area { flex: 1; display: flex; flex-direction: column; position: relative; background: #0a0a0f; }
+  .app-layout { display: flex; width: 100vw; height: 100vh; min-width: 800px; overflow: hidden; }
+  .viewport-area { flex: 1; min-width: 400px; display: flex; flex-direction: column; position: relative; background: #0a0a0f; overflow: hidden; }
   
   .toolbar { 
     position: absolute; top: 0; left: 0; right: 0; 
@@ -1894,17 +1910,20 @@
   @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.5; } }
   
   .sidebar { 
-    width: 320px; 
+    width: 320px;
+    min-width: 280px;
+    flex-shrink: 0;
     background: rgba(0,0,0,0.95);
     border-left: 1px solid rgba(255,255,255,0.06);
     display: flex; flex-direction: column; 
     padding: 16px; 
     gap: 12px;
     backdrop-filter: blur(20px);
+    overflow-y: auto;
   }
   
   .panel-section { }
-  .panel-section.grow { flex: 1; display: flex; flex-direction: column; }
+  .panel-section.grow { flex: 1; display: flex; flex-direction: column; min-height: 150px; }
   
   h3 { 
     margin: 0 0 10px 0; 
