@@ -9,6 +9,8 @@
   let modelMeshes = []; 
   let selectedMeshes = new Set();
   let invisiblePlane;
+  let obbWireframes = []; // Визуализация OBB боксов
+  let obbClickMeshes = []; // Невидимые меши для клика по OBB
 
   // Ручной бокс
   let manualBox = null;
@@ -20,6 +22,15 @@
   let seats = [];
   let seatMode = false;
   let selectedSeatIndex = -1;
+
+  // OBB визуализация (wireframe боксы)
+  let obbHelpers = [];
+  
+  // OBB редактирование
+  let obbEditMesh = null; // Меш для редактирования выбранного OBB
+  
+  // Группы костей модели (для очистки при загрузке новой)
+  let boneGroups = [];
 
   // WASD движение
   let keys = { w: false, a: false, s: false, d: false, shift: false, space: false, ctrl: false };
@@ -35,6 +46,8 @@
   let cameraMode = false; // true = WASD mode, false = selection
   let isDragging = false;
   let moveSpeed = 0.15; // базовая скорость WASD
+  let vehicleType = 'wheeled'; // 'wheeled' = машина (колёса отдельно), 'tracked' = танк (колёса объединены)
+  let lastObbCount = 0; // количество OBB после последней генерации
 
   // История для Ctrl+Z
   let history = [];
@@ -55,7 +68,7 @@
       speed: 'Скорость',
       selection: 'Выделение',
       cube: 'Куб',
-      bone: 'Кость',
+      autoObb: 'Авто OBB',
       tools: 'Инструменты',
       all: 'Всё',
       reset: 'Сброс',
@@ -71,10 +84,17 @@
       loadFile: 'Загрузи .geo.json файл',
       clickSelect: 'Клик = выделить',
       selected: 'Выделено',
+      mode: 'Режим',
+      vehicleType: 'Тип',
+      wheeled: 'Машина',
+      tracked: 'Танк',
       wasdMode: 'WASD режим · Мышь вращение · Ctrl быстрее',
       clickForSeat: 'Кликай по модели для сидения',
       clickToDraw: 'Кликай для рисования · Esc отмена',
       manualBoxHint: 'Ручной бокс · T Move · R Scale · Del удалить',
+      obbSelected: 'OBB',
+      obbEditHint: 'T Move · R Scale · Del удалить · Esc отмена',
+      obbDeleteHint: 'Delete удалить · Esc отмена',
       tutorial: 'Туториал',
       tutorialTitle: 'Как пользоваться',
       tutorialItems: [
@@ -98,7 +118,7 @@
       speed: 'Speed',
       selection: 'Selection',
       cube: 'Cube',
-      bone: 'Bone',
+      autoObb: 'Auto OBB',
       tools: 'Tools',
       all: 'All',
       reset: 'Reset',
@@ -114,10 +134,17 @@
       loadFile: 'Load .geo.json file',
       clickSelect: 'Click = select',
       selected: 'Selected',
+      mode: 'Mode',
+      vehicleType: 'Type',
+      wheeled: 'Wheeled',
+      tracked: 'Tracked',
       wasdMode: 'WASD mode · Mouse rotate · Ctrl faster',
       clickForSeat: 'Click on model to add seat',
       clickToDraw: 'Click to draw · Esc cancel',
       manualBoxHint: 'Manual box · T Move · R Scale · Del delete',
+      obbSelected: 'OBB',
+      obbEditHint: 'T Move · R Scale · Del delete · Esc cancel',
+      obbDeleteHint: 'Delete to remove · Esc cancel',
       tutorial: 'Tutorial',
       tutorialTitle: 'How to use',
       tutorialItems: [
@@ -141,7 +168,7 @@
       speed: '速度',
       selection: '選択モード',
       cube: 'キューブ',
-      bone: 'ボーン',
+      autoObb: '自動OBB',
       tools: 'ツール',
       all: 'すべて',
       reset: 'リセット',
@@ -157,10 +184,17 @@
       loadFile: '.geo.jsonファイルを読み込む',
       clickSelect: 'クリック = 選択',
       selected: '選択済み',
+      mode: 'モード',
+      vehicleType: 'タイプ',
+      wheeled: '車両',
+      tracked: '戦車',
       wasdMode: 'WASDモード · マウス回転 · Ctrl 高速',
       clickForSeat: 'モデルをクリックしてシートを追加',
       clickToDraw: 'クリックして描画 · Esc キャンセル',
       manualBoxHint: '手動ボックス · T 移動 · R スケール · Del 削除',
+      obbSelected: 'OBB',
+      obbEditHint: 'T 移動 · R スケール · Del 削除 · Esc キャンセル',
+      obbDeleteHint: 'Delete 削除 · Esc キャンセル',
       tutorial: 'チュートリアル',
       tutorialTitle: '使い方',
       tutorialItems: [
@@ -240,6 +274,25 @@
   });
 
   function saveHistory() {
+    // Сохраняем состояние OBB wireframes
+    const obbState = obbWireframes.map(w => ({
+      position: w.position.clone(),
+      size: new THREE.Vector3().setFromMatrixScale(w.matrixWorld),
+      boneName: w.userData.boneName
+    }));
+    
+    // Получаем размеры из geometry
+    const obbData = obbWireframes.map(w => {
+      const box = new THREE.Box3().setFromObject(w);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      return {
+        position: w.position.clone(),
+        size: size.clone(),
+        boneName: w.userData.boneName
+      };
+    });
+    
     const state = {
       selectedMeshes: new Set(selectedMeshes),
       hasManualBox: !!manualBox,
@@ -248,17 +301,19 @@
       seats: seats.map(s => ({ 
         position: s.mesh.position.clone(), 
         boneName: s.boneName 
-      }))
+      })),
+      obbData: obbData
     };
     history.push(state);
     if (history.length > MAX_HISTORY) history.shift();
-    console.log('History saved, length:', history.length);
   }
 
   function undo() {
-    console.log('Undo called, history length:', history.length);
     if (history.length === 0) return;
     const state = history.pop();
+    
+    // Снимаем выделение с OBB
+    deselectOBB();
     
     // Сбрасываем текущее выделение
     modelMeshes.forEach(mesh => {
@@ -311,7 +366,47 @@
       });
     }
     
-    updateJSON();
+    // Восстанавливаем OBB
+    if (state.obbData) {
+      // Удаляем текущие OBB
+      obbWireframes.forEach(w => {
+        scene.remove(w);
+        w.geometry.dispose();
+        w.material.dispose();
+      });
+      obbWireframes = [];
+      
+      obbClickMeshes.forEach(m => {
+        scene.remove(m);
+        m.geometry.dispose();
+        m.material.dispose();
+      });
+      obbClickMeshes = [];
+      
+      // Создаём OBB из сохранённого состояния
+      state.obbData.forEach(obb => {
+        const boxGeo = new THREE.BoxGeometry(obb.size.x, obb.size.y, obb.size.z);
+        const edges = new THREE.EdgesGeometry(boxGeo);
+        const lineMat = new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 });
+        const wireframe = new THREE.LineSegments(edges, lineMat);
+        wireframe.position.copy(obb.position);
+        wireframe.userData = { boneName: obb.boneName };
+        scene.add(wireframe);
+        obbWireframes.push(wireframe);
+        
+        const clickGeo = new THREE.BoxGeometry(obb.size.x, obb.size.y, obb.size.z);
+        const clickMat = new THREE.MeshBasicMaterial({ visible: false });
+        const clickMesh = new THREE.Mesh(clickGeo, clickMat);
+        clickMesh.position.copy(obb.position);
+        clickMesh.userData = { isOBB: true, boneName: obb.boneName, wireframe };
+        scene.add(clickMesh);
+        obbClickMeshes.push(clickMesh);
+        
+        boxGeo.dispose();
+      });
+    }
+    
+    regenerateOBBJson();
   }
 
   function createSeatMesh() {
@@ -423,12 +518,16 @@
 
     transformControl = new TransformControls(camera, renderer.domElement);
     transformControl.addEventListener('change', () => { 
-      if(manualBox || selectedSeatIndex >= 0) updateJSON(); 
+      if(manualBox || selectedSeatIndex >= 0) updateJSON();
+      // Обновляем OBB wireframe при редактировании
+      if (obbEditMesh && selectedOBB && selectedOBB.wireframe) {
+        updateOBBWireframe();
+      }
     });
     transformControl.addEventListener('dragging-changed', (e) => { 
       controls.enabled = !e.value;
       // Сохраняем историю ПЕРЕД началом перетаскивания
-      if (e.value && (manualBox || selectedSeatIndex >= 0)) saveHistory();
+      if (e.value && (manualBox || selectedSeatIndex >= 0 || obbEditMesh)) saveHistory();
     });
     scene.add(transformControl);
 
@@ -536,10 +635,18 @@
     switch(key) {
       case 't': setEditMode('translate'); break;
       case 'r': setEditMode('scale'); break;
-      case 'delete': deleteManualBox(); break;
+      case 'delete': 
+        if (selectedOBB) {
+          deleteSelectedOBB();
+        } else {
+          deleteManualBox(); 
+        }
+        break;
       case 'escape': 
         cancelDrawing(); 
         selectedSeatIndex = -1;
+        // Снимаем выделение с OBB
+        deselectOBB();
         if (transformControl.object && seats.some(s => s.mesh === transformControl.object)) {
           transformControl.detach();
         }
@@ -561,6 +668,7 @@
   function setEditMode(mode) {
     editMode = mode;
     if (manualBox) transformControl.setMode(mode);
+    if (obbEditMesh) transformControl.setMode(mode);
   }
 
   function startDrawing() {
@@ -608,13 +716,14 @@
     updateJSON();
   }
 
-  function getIntersect(e, includeSeatMeshes = false) {
+  function getIntersect(e, includeSeatMeshes = false, includeOBB = false) {
     const rect = renderer.domElement.getBoundingClientRect();
     mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
     mouse.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
     raycaster.setFromCamera(mouse, camera);
     const seatMeshes = includeSeatMeshes ? seats.map(s => s.mesh) : [];
-    const objects = [...seatMeshes, ...modelMeshes, invisiblePlane];
+    const obbMeshes = includeOBB ? obbClickMeshes : [];
+    const objects = [...obbMeshes, ...seatMeshes, ...modelMeshes, invisiblePlane];
     const intersects = raycaster.intersectObjects(objects);
     return intersects.length > 0 ? intersects[0] : null;
   }
@@ -641,7 +750,14 @@
     if (transformControl.dragging || e.button !== 0) return;
     if (cameraMode) return;
 
-    // Проверяем клик по сидению (приоритет)
+    // Проверяем клик по OBB (приоритет)
+    const obbIntersect = getIntersect(e, false, true);
+    if (obbIntersect && obbIntersect.object.userData && obbIntersect.object.userData.isOBB) {
+      selectOBB(obbIntersect.object);
+      return;
+    }
+
+    // Проверяем клик по сидению
     const seatIntersect = getIntersect(e, true);
     if (seatIntersect) {
       const seatIdx = seats.findIndex(s => s.mesh === seatIntersect.object);
@@ -679,12 +795,176 @@
 
     if (intersect.object && intersect.object.userData && intersect.object.userData.boneName) {
       saveHistory();
-      if (selectionMode === 'cube') {
-        toggleMeshSelection(intersect.object);
-      } else if (selectionMode === 'bone') {
-        toggleBoneSelection(intersect.object.userData.boneName);
-      }
+      toggleMeshSelection(intersect.object);
     }
+  }
+
+  let selectedOBB = null;
+
+  function selectOBB(clickMesh) {
+    // Снимаем выделение с предыдущего OBB
+    if (selectedOBB && selectedOBB.wireframe) {
+      selectedOBB.wireframe.material.color.setHex(0x00ff00);
+    }
+    
+    // Удаляем старый редактируемый меш
+    if (obbEditMesh) {
+      transformControl.detach();
+      scene.remove(obbEditMesh);
+      obbEditMesh.geometry.dispose();
+      obbEditMesh.material.dispose();
+      obbEditMesh = null;
+    }
+    
+    selectedOBB = clickMesh.userData;
+    
+    // Подсвечиваем выбранный OBB желтым
+    if (selectedOBB.wireframe) {
+      selectedOBB.wireframe.material.color.setHex(0xffff00);
+    }
+    
+    // Создаём редактируемый меш для OBB
+    const wireframe = selectedOBB.wireframe;
+    const geo = new THREE.BoxGeometry(1, 1, 1);
+    const mat = new THREE.MeshStandardMaterial({ 
+      color: 0xffaa00, 
+      transparent: true, 
+      opacity: 0.3,
+      emissive: 0x332200
+    });
+    obbEditMesh = new THREE.Mesh(geo, mat);
+    obbEditMesh.position.copy(wireframe.position);
+    
+    // Получаем размер из wireframe geometry
+    const box = new THREE.Box3().setFromObject(wireframe);
+    const size = new THREE.Vector3();
+    box.getSize(size);
+    obbEditMesh.scale.copy(size);
+    
+    scene.add(obbEditMesh);
+    transformControl.attach(obbEditMesh);
+    transformControl.setMode(editMode);
+  }
+
+  function deselectOBB() {
+    if (selectedOBB && selectedOBB.wireframe) {
+      selectedOBB.wireframe.material.color.setHex(0x00ff00);
+    }
+    if (obbEditMesh) {
+      transformControl.detach();
+      scene.remove(obbEditMesh);
+      obbEditMesh.geometry.dispose();
+      obbEditMesh.material.dispose();
+      obbEditMesh = null;
+    }
+    selectedOBB = null;
+  }
+
+  function updateOBBWireframe() {
+    if (!obbEditMesh || !selectedOBB || !selectedOBB.wireframe) return;
+    
+    const wireframe = selectedOBB.wireframe;
+    const clickMesh = obbClickMeshes.find(m => m.userData.wireframe === wireframe);
+    
+    // Обновляем позицию wireframe
+    wireframe.position.copy(obbEditMesh.position);
+    
+    // Обновляем размер wireframe (пересоздаём геометрию)
+    const newSize = obbEditMesh.scale;
+    wireframe.geometry.dispose();
+    const boxGeo = new THREE.BoxGeometry(newSize.x, newSize.y, newSize.z);
+    wireframe.geometry = new THREE.EdgesGeometry(boxGeo);
+    boxGeo.dispose();
+    
+    // Обновляем click mesh
+    if (clickMesh) {
+      clickMesh.position.copy(obbEditMesh.position);
+      clickMesh.geometry.dispose();
+      clickMesh.geometry = new THREE.BoxGeometry(newSize.x, newSize.y, newSize.z);
+    }
+    
+    // Обновляем JSON
+    regenerateOBBJson();
+  }
+
+  function regenerateOBBJson() {
+    // Пересобираем JSON из текущих wireframes
+    const obbArray = [];
+    
+    obbWireframes.forEach((wireframe, index) => {
+      const box = new THREE.Box3().setFromObject(wireframe);
+      const size = new THREE.Vector3();
+      const center = new THREE.Vector3();
+      box.getSize(size);
+      box.getCenter(center);
+      
+      obbArray.push({
+        "Size": [toFloat(size.x / 2), toFloat(size.y / 2), toFloat(size.z / 2)],
+        "Position": [toFloat(center.x * -1), toFloat(center.y), toFloat(center.z * -1)],
+        "Part": wireframe.userData.boneName || 'Manual'
+      });
+    });
+    
+    // Генерация Seats
+    const seatsArray = seats.map(s => {
+      const pos = s.mesh.position;
+      return {
+        "HidePassenger": true,
+        "BanHand": true,
+        "Transform": s.boneName,
+        "Position": [toFloat(pos.x * -1), toFloat(pos.y), toFloat(pos.z * -1)]
+      };
+    });
+
+    if (obbArray.length === 0 && seatsArray.length === 0) {
+      outputText = '';
+      return;
+    }
+
+    let parts = [];
+    if (obbArray.length > 0) {
+      const obbItems = obbArray.map(o => 
+        `{\n  "Size": [${o.Size.join(', ')}],\n  "Position": [${o.Position.join(', ')}],\n  "Part": "${o.Part}"\n}`
+      );
+      parts.push(`"OBB": [\n${obbItems.join(',\n')}\n]`);
+    }
+    if (seatsArray.length > 0) {
+      const seatsItems = seatsArray.map(s => 
+        `{\n  "HidePassenger": ${s.HidePassenger},\n  "BanHand": ${s.BanHand},\n  "Transform": "${s.Transform}",\n  "Position": [${s.Position.join(', ')}]\n}`
+      );
+      parts.push(`"Seats": [\n${seatsItems.join(',\n')}\n]`);
+    }
+    outputText = parts.join(',\n');
+  }
+
+  function deleteSelectedOBB() {
+    if (!selectedOBB) return;
+    
+    // Удаляем wireframe и click mesh
+    const wireframe = selectedOBB.wireframe;
+    const clickMeshIndex = obbClickMeshes.findIndex(m => m.userData.wireframe === wireframe);
+    const wireframeIndex = obbWireframes.indexOf(wireframe);
+    
+    if (wireframeIndex !== -1) {
+      scene.remove(wireframe);
+      wireframe.geometry.dispose();
+      wireframe.material.dispose();
+      obbWireframes.splice(wireframeIndex, 1);
+    }
+    
+    if (clickMeshIndex !== -1) {
+      const clickMesh = obbClickMeshes[clickMeshIndex];
+      scene.remove(clickMesh);
+      clickMesh.geometry.dispose();
+      clickMesh.material.dispose();
+      obbClickMeshes.splice(clickMeshIndex, 1);
+    }
+    
+    // Удаляем edit mesh
+    deselectOBB();
+    
+    // Обновляем JSON
+    regenerateOBBJson();
   }
 
   function selectSeat(index) {
@@ -794,27 +1074,248 @@
   function updateJSON() {
     const obbArray = [];
 
+    // Удаляем старые OBB wireframes и click meshes
+    obbWireframes.forEach(w => {
+      scene.remove(w);
+      w.geometry.dispose();
+      w.material.dispose();
+    });
+    obbWireframes = [];
+    
+    obbClickMeshes.forEach(m => {
+      scene.remove(m);
+      m.geometry.dispose();
+      m.material.dispose();
+    });
+    obbClickMeshes = [];
+
+    // Группируем выделенные меши по костям
+    const selectedBoneGroups = new Map();
+    
+    // Паттерны для игнорирования (только траки гусениц)
+    const ignorePatterns = [
+      /^track/i, /^GUS\d/i, /^gus$/i,  // траки гусениц
+    ];
+    
+    // Паттерны для объединения в группы (корпус, кабина и т.д.)
+    const mergeGroups = [
+      // Корпус/база - всё что относится к основному корпусу
+      { pattern: /^(base|body|cubedfdf|OPORY)/i, name: 'base' },
+      // Кабина - включая двери, люки, дворники, руль
+      { pattern: /^(CABIN|CABINA|door|hatch|wiper|Stering|whel$)/i, name: 'cabin' },
+      // Основа башни (corpus)
+      { pattern: /^corpus$/i, name: 'turret_base' },
+      // Верх башни (bone, turret)
+      { pattern: /^(bone$|turret$)/i, name: 'turret_top' },
+      // Пушка/ствол - отдельно от башни
+      { pattern: /^(barrel|Gun)/i, name: 'barrel' },
+      // Радар/сенсоры - отдельно
+      { pattern: /^(RADAR|radar)$/i, name: 'radar' },
+      // Двигатель
+      { pattern: /^(engine|Wheel$)/i, name: 'engine' },
+      // group1, group2... → frame
+      { pattern: /^group\d*$/i, name: 'frame' },
+      // Броня/защита
+      { pattern: /^(SIDE|DZ|RELICT|homework|ATGM)/i, name: 'armor' },
+    ];
+    
+    // Функция определения группы для объединения
+    function getMergeGroup(boneName, meshes) {
+      // Для танков (tracked) объединяем колёса по позиции X
+      if (vehicleType === 'tracked') {
+        // Проверяем, похоже ли на колесо по имени
+        const isWheel = /^(wheel|whell|whl|koleso)/i.test(boneName);
+        if (isWheel && meshes && meshes.length > 0) {
+          // Определяем сторону по позиции X первого меша
+          const worldPos = new THREE.Vector3();
+          meshes[0].getWorldPosition(worldPos);
+          if (worldPos.x > 0.1) {
+            return 'WheelLeft'; // В Three.js X > 0 это левая сторона (инверсия)
+          } else if (worldPos.x < -0.1) {
+            return 'WheelRight';
+          }
+        }
+      }
+      
+      for (const group of mergeGroups) {
+        if (group.pattern.test(boneName)) {
+          return group.name;
+        }
+      }
+      return boneName; // если не подходит ни под одну группу - оставляем как есть
+    }
+    
+    // Функция проверки "антенноподобности" кости
+    function isAntennaLike(meshes) {
+      const box = new THREE.Box3();
+      meshes.forEach(mesh => {
+        const meshBox = new THREE.Box3().setFromObject(mesh);
+        box.union(meshBox);
+      });
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      
+      const sizes = [size.x, size.y, size.z].sort((a, b) => b - a);
+      const aspectRatio = sizes[0] / sizes[2]; // самая длинная / самая короткая
+      // Антенна: очень вытянутая (>6:1) и тонкая (<0.3)
+      return aspectRatio > 6 && sizes[2] < 0.3;
+    }
+    
+    // Сначала группируем меши по костям
+    const boneToMeshes = new Map();
     selectedMeshes.forEach(meshId => {
       const mesh = modelMeshes.find(m => m.uuid === meshId);
       if (!mesh || !mesh.userData) return;
+      
+      let boneName = mesh.userData.boneName;
+      
+      // Проверяем игнорируемые паттерны
+      if (ignorePatterns.some(p => p.test(boneName))) {
+        return;
+      }
+      
+      if (!boneToMeshes.has(boneName)) {
+        boneToMeshes.set(boneName, []);
+      }
+      boneToMeshes.get(boneName).push(mesh);
+    });
+    
+    // Теперь группируем кости, но антенноподобные оставляем отдельно (они отфильтруются позже)
+    boneToMeshes.forEach((meshes, boneName) => {
+      // Проверяем, антенна ли это
+      if (isAntennaLike(meshes)) {
+        // Антенны не добавляем в группы - они отфильтруются по размеру позже
+        return;
+      }
+      
+      // Определяем группу для объединения (передаём меши для определения позиции колёс)
+      const groupName = getMergeGroup(boneName, meshes);
+      
+      if (!selectedBoneGroups.has(groupName)) {
+        selectedBoneGroups.set(groupName, []);
+      }
+      // Добавляем все меши этой кости в группу
+      meshes.forEach(mesh => selectedBoneGroups.get(groupName).push(mesh));
+    });
 
-      const { boneName, originalOrigin, originalSize } = mesh.userData;
+    // Функция проверки "антенноподобности" отдельного меша
+    function isMeshAntennaLike(mesh) {
+      const box = new THREE.Box3().setFromObject(mesh);
+      const size = new THREE.Vector3();
+      box.getSize(size);
+      
+      const sizes = [size.x, size.y, size.z].sort((a, b) => b - a);
+      const aspectRatio = sizes[0] / sizes[2];
+      // Антенна: очень вытянутая (>8:1) и тонкая (<0.15)
+      return aspectRatio > 8 && sizes[2] < 0.15;
+    }
 
-      // Оригинальная формула: Size = originalSize / 32
+    // Сначала собираем все OBB с их Box3
+    const tempObbList = [];
+    
+    selectedBoneGroups.forEach((meshes, groupName) => {
+      const combinedBox = new THREE.Box3();
+      
+      meshes.forEach(mesh => {
+        // Пропускаем антенноподобные кубы
+        if (isMeshAntennaLike(mesh)) {
+          return;
+        }
+        const meshBox = new THREE.Box3().setFromObject(mesh);
+        combinedBox.union(meshBox);
+      });
+      
+      // Если после фильтрации ничего не осталось - пропускаем
+      if (combinedBox.isEmpty()) {
+        return;
+      }
+
+      const worldSize = new THREE.Vector3();
+      const worldCenter = new THREE.Vector3();
+      combinedBox.getSize(worldSize);
+      combinedBox.getCenter(worldCenter);
+
+      // Фильтр по размеру - игнорируем слишком маленькие/тонкие OBB
+      const minThickness = 0.1; // минимальная толщина
+      
+      // Пропускаем если слишком тонкий (любой размер < minThickness)
+      if (worldSize.x < minThickness || worldSize.y < minThickness || worldSize.z < minThickness) {
+        return;
+      }
+      
+      // Фильтр антенн - если одна сторона намного больше других (соотношение > 10:1)
+      const sizes = [worldSize.x, worldSize.y, worldSize.z].sort((a, b) => b - a);
+      const aspectRatio = sizes[0] / sizes[2]; // самая длинная / самая короткая
+      if (aspectRatio > 10 && sizes[2] < 0.15) {
+        return; // это антенна или провод
+      }
+
       const size = [
-        toFloat(originalSize[0] / 32),
-        toFloat(originalSize[1] / 32),
-        toFloat(originalSize[2] / 32)
+        toFloat(worldSize.x / 2),
+        toFloat(worldSize.y / 2),
+        toFloat(worldSize.z / 2)
       ];
 
-      // Position = origin / 16 с инверсией X,Z (БЕЗ добавления size/2)
       const position = [
-        toFloat((originalOrigin[0] / 16) * -1),
-        toFloat(originalOrigin[1] / 16),
-        toFloat((originalOrigin[2] / 16) * -1)
+        toFloat(worldCenter.x * -1),
+        toFloat(worldCenter.y),
+        toFloat(worldCenter.z * -1)
       ];
 
-      obbArray.push({ "Size": size, "Position": position, "Part": boneName });
+      // Сохраняем во временный список с Box3 для проверки вложенности
+      tempObbList.push({
+        size,
+        position,
+        part: groupName,
+        box3: combinedBox.clone(),
+        worldSize: worldSize.clone(),
+        worldCenter: worldCenter.clone()
+      });
+    });
+
+    // Фильтруем OBB которые полностью внутри других
+    const filteredObbList = tempObbList.filter((obb, index) => {
+      // Проверяем, не находится ли этот OBB полностью внутри другого большего OBB
+      for (let i = 0; i < tempObbList.length; i++) {
+        if (i === index) continue;
+        const other = tempObbList[i];
+        // Если other полностью содержит obb
+        if (other.box3.containsBox(obb.box3)) {
+          // Проверяем что other больше (чтобы не удалить оба)
+          const obbVolume = obb.worldSize.x * obb.worldSize.y * obb.worldSize.z;
+          const otherVolume = other.worldSize.x * other.worldSize.y * other.worldSize.z;
+          if (otherVolume > obbVolume * 1.5) { // other должен быть минимум в 1.5 раза больше
+            return false; // удаляем этот OBB
+          }
+        }
+      }
+      return true;
+    });
+
+    // Создаём OBB и wireframes для отфильтрованного списка
+    filteredObbList.forEach(obb => {
+      obbArray.push({ "Size": obb.size, "Position": obb.position, "Part": obb.part });
+
+      // Создаем wireframe визуализацию OBB (зеленые линии)
+      const boxGeo = new THREE.BoxGeometry(obb.worldSize.x, obb.worldSize.y, obb.worldSize.z);
+      const edges = new THREE.EdgesGeometry(boxGeo);
+      const lineMat = new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 });
+      const wireframe = new THREE.LineSegments(edges, lineMat);
+      wireframe.position.copy(obb.worldCenter);
+      wireframe.userData = { obbIndex: obbArray.length - 1, boneName: obb.part };
+      scene.add(wireframe);
+      obbWireframes.push(wireframe);
+      
+      // Невидимый mesh для клика
+      const clickGeo = new THREE.BoxGeometry(obb.worldSize.x, obb.worldSize.y, obb.worldSize.z);
+      const clickMat = new THREE.MeshBasicMaterial({ visible: false });
+      const clickMesh = new THREE.Mesh(clickGeo, clickMat);
+      clickMesh.position.copy(obb.worldCenter);
+      clickMesh.userData = { isOBB: true, obbIndex: obbArray.length - 1, boneName: obb.part, wireframe };
+      scene.add(clickMesh);
+      obbClickMeshes.push(clickMesh);
+      
+      boxGeo.dispose();
     });
 
     if (manualBox) {
@@ -826,6 +1327,16 @@
         "Position": [toFloat(pos.x * -1), toFloat(pos.y), toFloat(pos.z * -1)],
         "Part": "Manual"
       });
+
+      // Wireframe для manual box
+      const boxGeo = new THREE.BoxGeometry(scale.x, scale.y, scale.z);
+      const edges = new THREE.EdgesGeometry(boxGeo);
+      const lineMat = new THREE.LineBasicMaterial({ color: 0x00ff00, linewidth: 2 });
+      const wireframe = new THREE.LineSegments(edges, lineMat);
+      wireframe.position.copy(pos);
+      scene.add(wireframe);
+      obbWireframes.push(wireframe);
+      boxGeo.dispose();
     }
 
     // Генерация Seats (игрок смотрит на +Z)
@@ -869,6 +1380,25 @@
     outputText = parts.join(',\n');
   }
 
+  function generateAutoOBB() {
+    if (modelMeshes.length === 0) return;
+    
+    saveHistory();
+    
+    // Добавляем все кубы в selectedMeshes БЕЗ перекраски (для производительности)
+    modelMeshes.forEach(mesh => {
+      selectedMeshes.add(mesh.uuid);
+    });
+    
+    // Генерируем OBB
+    updateJSON();
+    
+    // Сохраняем количество OBB и очищаем выделение (чтобы не показывать 618 кубов)
+    lastObbCount = obbWireframes.length;
+    selectedMeshes.clear();
+    selectedMeshes = selectedMeshes;
+  }
+
   function handleModelUpload(e) {
     const file = e.target.files[0];
     if(!file) return;
@@ -885,15 +1415,46 @@
   }
 
   function buildModel() {
+    // Удаляем старые группы костей из сцены
+    boneGroups.forEach(g => {
+      scene.remove(g);
+    });
+    boneGroups = [];
+    
     modelMeshes.forEach(m => { 
       m.geometry.dispose(); 
       m.material.dispose(); 
-      scene.remove(m); 
     });
     modelMeshes = [];
     selectedMeshes.clear();
     history = [];
     if (manualBox) deleteManualBox(false);
+    
+    // Очищаем сидения
+    seats.forEach(s => {
+      scene.remove(s.mesh);
+      s.mesh.geometry.dispose();
+      s.mesh.material.dispose();
+    });
+    seats = [];
+    selectedSeatIndex = -1;
+    
+    // Очищаем OBB wireframes и click meshes
+    obbWireframes.forEach(w => {
+      scene.remove(w);
+      w.geometry.dispose();
+      w.material.dispose();
+    });
+    obbWireframes = [];
+    
+    obbClickMeshes.forEach(m => {
+      scene.remove(m);
+      m.geometry.dispose();
+      m.material.dispose();
+    });
+    obbClickMeshes = [];
+    selectedOBB = null;
+    
     outputText = '';
     errorMessage = '';
 
@@ -926,6 +1487,7 @@
         node.group.position.set(-(cp[0]-pp[0])/16, (cp[1]-pp[1])/16, (cp[2]-pp[2])/16);
       } else {
         scene.add(node.group);
+        boneGroups.push(node.group); // Сохраняем корневые группы для очистки
         const cp = b.pivot || [0,0,0];
         node.group.position.set(-cp[0]/16, cp[1]/16, cp[2]/16);
       }
@@ -1062,11 +1624,15 @@
             {t.clickToDraw}
           </span>
         {:else if manualBox}
-          �️ Ручной бокс | T - Move | R - Scale | Delete - удалить
+          ⬜️ {t.manualBoxHint}
+        {:else if selectedOBB}
+          <span style="color:#ffff00">📦 {t.obbSelected}: {selectedOBB.boneName}</span> | {t.obbEditHint}
+        {:else if obbWireframes.length > 0 && selectedMeshes.size === 0}
+          📦 OBB: <b style="color:#00ff00">{obbWireframes.length}</b> | {t.clickSelect}
         {:else if modelMeshes.length > 0}
-          🖱️ Клик = выделить | Режим: <b style="color:#ff9800">{selectionMode === 'cube' ? 'Куб' : 'Кость'}</b> | Выделено: <b style="color:#00ff00">{selectedMeshes.size}</b>
+          🖱️ {t.clickSelect} | {t.mode}: <b style="color:#ff9800">{t.cube}</b> | {t.selected}: <b style="color:#00ff00">{selectedMeshes.size}</b>
         {:else}
-          Загрузи JSON файл модели
+          {t.loadFile}
         {/if}
       </div>
     </div>
@@ -1102,9 +1668,33 @@
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
             {t.cube}
           </button>
-          <button class="mode-btn" class:active={selectionMode === 'bone'} on:click={() => selectionMode = 'bone'}>
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 10c.7-.7 1.69 0 2.5 0a2.5 2.5 0 1 0 0-5 .5.5 0 0 1-.5-.5 2.5 2.5 0 1 0-5 0c0 .81.7 1.8 0 2.5l-7 7c-.7.7-1.69 0-2.5 0a2.5 2.5 0 0 0 0 5c.28 0 .5.22.5.5a2.5 2.5 0 1 0 5 0c0-.81-.7-1.8 0-2.5Z"/></svg>
-            {t.bone}
+          <button class="mode-btn" on:click={generateAutoOBB}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18"/><path d="M9 21V9"/></svg>
+            {t.autoObb}
+          </button>
+        </div>
+        <div class="vehicle-type-toggle">
+          <button class="vehicle-btn" class:active={vehicleType === 'wheeled'} on:click={() => vehicleType = 'wheeled'}>
+            <svg class="vehicle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <rect x="3" y="8" width="18" height="8" rx="2"/>
+              <circle cx="7" cy="16" r="2.5"/>
+              <circle cx="17" cy="16" r="2.5"/>
+              <path d="M5 8V6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v2"/>
+            </svg>
+            <span class="vehicle-label">{t.wheeled}</span>
+          </button>
+          <button class="vehicle-btn" class:active={vehicleType === 'tracked'} on:click={() => vehicleType = 'tracked'}>
+            <svg class="vehicle-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <!-- Гусеницы -->
+              <rect x="2" y="12" width="20" height="6" rx="3"/>
+              <!-- Корпус -->
+              <path d="M4 12V9a1 1 0 0 1 1-1h14a1 1 0 0 1 1 1v3"/>
+              <!-- Башня -->
+              <rect x="8" y="5" width="8" height="3" rx="1"/>
+              <!-- Пушка -->
+              <path d="M16 6.5h5"/>
+            </svg>
+            <span class="vehicle-label">{t.tracked}</span>
           </button>
         </div>
       </div>
@@ -1353,9 +1943,58 @@
     justify-content: center;
     gap: 6px;
   }
+  .mode-btn.small {
+    padding: 6px 10px;
+    font-size: 0.8rem;
+  }
   .mode-btn:hover { background: rgba(255,255,255,0.05); color: #f5f5f7; }
   .mode-btn.active { background: rgba(255,255,255,0.1); color: #fff; }
   .mode-btn svg { width: 16px; height: 16px; }
+
+  /* Vehicle type toggle */
+  .vehicle-type-toggle {
+    display: flex;
+    gap: 8px;
+    margin-top: 10px;
+  }
+  .vehicle-btn {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    padding: 10px 8px;
+    border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(255,255,255,0.03);
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+  .vehicle-btn:hover {
+    background: rgba(255,255,255,0.06);
+    border-color: rgba(255,255,255,0.15);
+  }
+  .vehicle-btn.active {
+    background: rgba(46, 204, 113, 0.15);
+    border-color: rgba(46, 204, 113, 0.4);
+  }
+  .vehicle-icon {
+    width: 28px;
+    height: 28px;
+    color: #86868b;
+    transition: color 0.2s;
+  }
+  .vehicle-btn.active .vehicle-icon {
+    color: #2ecc71;
+  }
+  .vehicle-label {
+    font-size: 0.75rem;
+    color: #86868b;
+    font-weight: 500;
+  }
+  .vehicle-btn.active .vehicle-label {
+    color: #2ecc71;
+  }
 
   .speed-slider { margin-top: 12px; }
   .speed-slider label { display: block; font-size: 0.8rem; color: #6e6e73; margin-bottom: 8px; }
