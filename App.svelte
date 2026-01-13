@@ -1099,22 +1099,18 @@
     
     // Паттерны для объединения в группы (корпус, кабина и т.д.)
     const mergeGroups = [
-      // Корпус/база - всё что относится к основному корпусу
-      { pattern: /^(base|body|cubedfdf|OPORY)/i, name: 'base' },
-      // Кабина - включая двери, люки, дворники, руль
-      { pattern: /^(CABIN|CABINA|door|hatch|wiper|Stering|whel$)/i, name: 'cabin' },
-      // Основа башни (corpus)
-      { pattern: /^corpus$/i, name: 'turret_base' },
-      // Верх башни (bone, turret)
-      { pattern: /^(bone$|turret$)/i, name: 'turret_top' },
+      // Корпус/база/кабина/corpus - всё объединяем в body
+      { pattern: /^(base|body|cubedfdf|OPORY|CABIN|CABINA|door|hatch|wiper|Stering|whel$|corpus$|frame)/i, name: 'body' },
+      // Верх башни (bone, turret) - отдельно вращается
+      { pattern: /^(bone$|turret$)/i, name: 'turret' },
       // Пушка/ствол - отдельно от башни
       { pattern: /^(barrel|Gun)/i, name: 'barrel' },
       // Радар/сенсоры - отдельно
       { pattern: /^(RADAR|radar)$/i, name: 'radar' },
       // Двигатель
       { pattern: /^(engine|Wheel$)/i, name: 'engine' },
-      // group1, group2... → frame
-      { pattern: /^group\d*$/i, name: 'frame' },
+      // group1, group2... → body тоже
+      { pattern: /^group\d*$/i, name: 'body' },
       // Броня/защита
       { pattern: /^(SIDE|DZ|RELICT|homework|ATGM)/i, name: 'armor' },
     ];
