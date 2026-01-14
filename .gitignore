@@ -8,6 +8,9 @@ yarn-error.log*
 dist/
 build/
 
+# Tauri (only in tauri branch)
+src-tauri/
+
 # Environment variables
 .env
 .env.local
